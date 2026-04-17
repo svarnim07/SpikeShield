@@ -1,0 +1,6 @@
+.git
+.vercel
+node_modules
+events.log
+queue.json
+spam.js

@@ -22,8 +22,8 @@ const MAX_QUEUE_SIZE = 50000;          // backpressure threshold
 const MAX_RETRIES = 3;             // max retry attempts per job
 const LOCK_TIMEOUT_MS = 10_000;        // stuck-job threshold (10 s)
 const RETRY_BASE_MS = 1_000;         // exponential backoff base delay
-const QUEUE_FILE = path.join(__dirname, 'queue.json');
-const EVENTS_LOG_FILE = path.join(__dirname, 'events.log');
+const QUEUE_FILE = process.env.VERCEL ? '/tmp/queue.json' : path.join(__dirname, 'queue.json');
+const EVENTS_LOG_FILE = process.env.VERCEL ? '/tmp/events.log' : path.join(__dirname, 'events.log');
 const SAVE_DEBOUNCE = 300;           // ms — debounce disk writes
 
 // ─── Shared State ────────────────────────────────────────────
@@ -91,7 +91,13 @@ function rebuildStateFromEvents() {
 
     for (const line of lines) {
       if (!line) continue;
-      const ev = JSON.parse(line);
+      let ev;
+      try {
+        ev = JSON.parse(line);
+      } catch (err) {
+        console.warn('[queue] Skipping corrupted event log line');
+        continue;
+      }
       if (ev.type === 'JOB_ENQUEUED') {
         if (!processedJobIds.has(ev.jobId)) eventJobs.set(ev.jobId, ev.job);
       } else if (ev.type === 'JOB_DEQUEUED' || ev.type === 'dequeued') {
@@ -252,7 +258,7 @@ function requeueJob(job) {
   job.retries += 1;
   job.lastFailedAt = new Date().toISOString();
   delete job.lockedBy; delete job.lockedAt; delete job.startTime;
-  const delayMs = RETRY_BASE_MS * Math.pow(2, job.retries - 1);
+  const delayMs = RETRY_BASE_MS * Math.pow(2, job.retries - 1) + Math.floor(Math.random() * 500);
   job.nextRetryAt = Date.now() + delayMs;
   job.nextRetryIn = `${delayMs}ms`;
   jobs.push(job);
@@ -263,6 +269,37 @@ function requeueJob(job) {
 // ─── Append-only event log ────────────────────────────────────
 let eventBuffer = '';
 let eventFlushTimer = null;
+
+function rotateLogIfNeeded() {
+  if (process.env.VERCEL) return;
+  try {
+    const stats = fs.statSync(EVENTS_LOG_FILE);
+    if (stats.size > 10 * 1024 * 1024) { // 10MB
+      fs.copyFileSync(EVENTS_LOG_FILE, EVENTS_LOG_FILE.replace('.log', '.old.log'));
+      fs.writeFileSync(EVENTS_LOG_FILE, '');
+    }
+  } catch (err) {}
+}
+
+function flushEvents() {
+  if (eventBuffer) {
+    const flushData = eventBuffer;
+    eventBuffer = '';
+    if (!process.env.VERCEL) {
+      try {
+        fs.appendFileSync(EVENTS_LOG_FILE, flushData);
+        rotateLogIfNeeded();
+      } catch (err) {
+        console.error('[queue] Failed to sync flush events:', err);
+      }
+    }
+  }
+}
+
+process.on('exit', flushEvents);
+process.on('SIGINT', () => { flushEvents(); process.exit(0); });
+process.on('SIGTERM', () => { flushEvents(); process.exit(0); });
+
 /** appendEvent(type, data) — writes one JSON line to events.log */
 function appendEvent(type, data) {
   const line = JSON.stringify({ ts: new Date().toISOString(), type, ...data }) + '\n';
@@ -275,6 +312,7 @@ function appendEvent(type, data) {
       if (flushData) {
         fs.appendFile(EVENTS_LOG_FILE, flushData, (err) => {
           if (err) console.error('[queue] Failed to write event:', err);
+          else rotateLogIfNeeded();
         });
       }
     }, 50);
@@ -305,7 +343,7 @@ setInterval(recoverStuckJobs, 5_000);
 
 // ─── Express App ─────────────────────────────────────────────
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 // ── Middleware: request logger (skip high-frequency internal calls) ──
 const SILENT_PATHS = new Set(['/internal/dequeue', '/internal/complete', '/internal/fail', '/stats', '/health']);
@@ -981,6 +1019,7 @@ app.post('/internal/dequeue', (req, res) => {
 app.post('/internal/complete', (req, res) => {
   const { id, workerId } = req.body;
   const job = processingJobs.get(id);
+  appendEvent('JOB_COMPLETED', { jobId: id, workerId });
   processingJobs.delete(id);
   saveQueue();
   totalProcessed++;
@@ -994,7 +1033,6 @@ app.post('/internal/complete', (req, res) => {
   }
   tputWindow.push(now);
   processedJobIds.add(id);
-  appendEvent('JOB_COMPLETED', { jobId: id, workerId });
   res.json({ ok: true });
 });
 
@@ -1024,8 +1062,9 @@ app.post('/internal/fail', (req, res) => {
 // ─── Start Server ─────────────────────────────────────────────
 loadQueue();   // recover persisted jobs before accepting traffic
 
-app.listen(PORT, () => {
-  console.log(`
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`
 ╔══════════════════════════════════════════════════╗
 ║          SpikeShield Local — Server              ║
 ╠══════════════════════════════════════════════════╣
@@ -1033,10 +1072,10 @@ app.listen(PORT, () => {
 ║  Live Dashboard   : http://localhost:${PORT}/        ║
 ║  Stats            : http://localhost:${PORT}/stats   ║
 ║  Max queue        : ${MAX_QUEUE_SIZE} jobs                    ║
-║  Persistence      : queue.json                   ║
+║  Persistence      : ${process.env.VERCEL ? '/tmp/' : ''}queue.json                   ║
 ╚══════════════════════════════════════════════════╝
 `);
-});
+  });
+}
 
-// Export shared state for programmatic use / testing
-module.exports = { jobs, processingJobs, dequeue, enqueue, requeueJob };
+module.exports = app;

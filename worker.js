@@ -123,6 +123,9 @@ async function handleJob(job) {
  * each sequentially before polling again.  If the queue is empty,
  * waits POLL_INTERVAL_MS before retrying.
  */
+let currentPollInterval = POLL_INTERVAL_MS;
+const MAX_POLL_INTERVAL = 5000;
+
 async function runLoop() {
   console.log(`[${WORKER_ID}] 🚀 Started. Server: http://${SERVER_HOST}:${SERVER_PORT} | batch: ${BATCH_SIZE}`);
 
@@ -137,15 +140,20 @@ async function runLoop() {
       });
     } catch (err) {
       console.warn(`[${WORKER_ID}] ⚠️  Cannot reach server: ${err.message}. Retrying…`);
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(currentPollInterval);
+      currentPollInterval = Math.min(currentPollInterval * 1.5, MAX_POLL_INTERVAL);
       continue;
     }
 
     // ── 2. Empty queue — back off ────────────────────────────
     if (response.empty) {
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(currentPollInterval);
+      currentPollInterval = Math.min(currentPollInterval * 1.5, MAX_POLL_INTERVAL);
       continue;
     }
+
+    // Reset backoff on successful poll
+    currentPollInterval = POLL_INTERVAL_MS;
 
     // ── 3. Process batch sequentially ───────────────────────
     // The server already stamped each job with lockedBy/lockedAt.
