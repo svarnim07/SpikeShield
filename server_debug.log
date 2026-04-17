@@ -1,0 +1,27 @@
+[queue] Loaded 0 pending job(s) from disk.
+
+╔══════════════════════════════════════════════════╗
+║          SpikeShield Local — Server              ║
+╠══════════════════════════════════════════════════╣
+║  API  + Dashboard : http://localhost:3000        ║
+║  Live Dashboard   : http://localhost:3000/        ║
+║  Stats            : http://localhost:3000/stats   ║
+║  Max queue        : 1000 jobs                    ║
+║  Persistence      : queue.json                   ║
+╚══════════════════════════════════════════════════╝
+
+[http] POST /job
+JOB ROUTE HIT debug-job-1
+ENQUEUE DONE debug-job-1
+CALLING JOB_ENQUEUED
+LOG FILE PATH: /Users/svarnim007/Desktop/hackathon/events.log
+APPEND EVENT: JOB_ENQUEUED
+[queue] Enqueued job debug-job-1 | queue size: 1
+EVENT WRITTEN: JOB_ENQUEUED
+LOG FILE PATH: /Users/svarnim007/Desktop/hackathon/events.log
+APPEND EVENT: JOB_DEQUEUED
+EVENT WRITTEN: JOB_DEQUEUED
+[worker] DONE: job debug-job-1 | total processed: 1
+LOG FILE PATH: /Users/svarnim007/Desktop/hackathon/events.log
+APPEND EVENT: JOB_COMPLETED
+EVENT WRITTEN: JOB_COMPLETED

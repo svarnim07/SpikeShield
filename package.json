@@ -1,0 +1,26 @@
+{
+  "name": "spikeshield-local",
+  "version": "1.0.0",
+  "description": "Local-only backend that handles load spikes without dropping or duplicating work.",
+  "main": "server.js",
+  "scripts": {
+    "start"   : "node server.js",
+    "worker"  : "node worker.js",
+    "monitor" : "node monitor.js",
+    "spam"    : "node spam.js",
+    "demo"    : "node spam.js 2000 20 0.1",
+    "pause"   : "curl -s -X POST http://localhost:3000/admin/pause  | node -e 'process.stdin.pipe(process.stdout)'",
+    "resume"  : "curl -s -X POST http://localhost:3000/admin/resume | node -e 'process.stdin.pipe(process.stdout)'",
+    "flush"   : "curl -s -X DELETE http://localhost:3000/admin/flush | node -e 'process.stdin.pipe(process.stdout)'",
+    "stats"   : "curl -s http://localhost:3000/stats | node -e 'const d=[];process.stdin.on(\"data\",c=>d.push(c));process.stdin.on(\"end\",()=>console.log(JSON.stringify(JSON.parse(Buffer.concat(d).toString()),null,2)))'"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid"   : "^9.0.0"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "author": "SpikeShield Team",
+  "license": "MIT"
+}
