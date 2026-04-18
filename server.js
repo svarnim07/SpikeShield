@@ -278,7 +278,7 @@ function rotateLogIfNeeded() {
       fs.copyFileSync(EVENTS_LOG_FILE, EVENTS_LOG_FILE.replace('.log', '.old.log'));
       fs.writeFileSync(EVENTS_LOG_FILE, '');
     }
-  } catch (err) {}
+  } catch (err) { }
 }
 
 function flushEvents() {
@@ -372,7 +372,7 @@ app.post('/job', (req, res) => {
     totalDropped++;
     return res.status(429).json({
       status: 'busy',
-      message: `Queue full (${MAX_QUEUE_SIZE} jobs). Try again later.`,
+      message: `Queue limit reached (${MAX_QUEUE_SIZE} jobs). Try again later.`,
       queueSize: jobs.length,
     });
   }
@@ -392,7 +392,7 @@ app.post('/job', (req, res) => {
   if (isDuplicate(jobId)) {
     return res.status(200).json({
       status: 'duplicate',
-      message: `Job "${jobId}" is already queued or being processed.`,
+      message: `Job "${jobId}" is already queued.`,
       jobId,
     });
   }
@@ -411,6 +411,34 @@ app.post('/job', (req, res) => {
   });
 
   return res.status(200).json({ status: 'queued', job });
+});
+
+/**
+ * POST /internal/bulk-job
+ * Instantly injects N jobs into the queue to simulate massive traffic spikes
+ * without hitting Vercel/browser rate limits.
+ */
+app.post('/internal/bulk-job', (req, res) => {
+  const { count } = req.body;
+  const num = Math.min(count || 1000, MAX_QUEUE_SIZE);
+  let queued = 0;
+  let busy = 0;
+
+  for (let i = 0; i < num; i++) {
+    const id = `bulk-${Date.now()}-${i}`;
+    if (jobs.length >= MAX_QUEUE_SIZE) {
+      totalDropped++;
+      busy++;
+    } else {
+      jobs.push({ id, payload: { source: 'bulk', i }, retries: 0, createdAt: new Date().toISOString() });
+      totalReceived++;
+      queued++;
+    }
+  }
+  
+  saveQueue();
+  appendEvent('BULK_RECEIVED', { count: num, queued, dropped: busy });
+  res.json({ queued, busy, status: 'ok' });
 });
 
 // ── GET /stats — Current system stats + rolling history ─────────
@@ -515,17 +543,7 @@ function getDashboardHTML() {
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
   :root {
-    --bg:      #0d0f14;
-    --surface: #161a24;
-    --card:    #1e2333;
-    --border:  #2a2f45;
-    --accent:  #6c63ff;
-    --green:   #22c55e;
-    --yellow:  #f59e0b;
-    --red:     #ef4444;
-    --blue:    #38bdf8;
-    --text:    #e2e8f0;
-    --muted:   #64748b;
+    
     --radius:  12px;
   }
 
@@ -922,43 +940,25 @@ async function sendStressRequests(total, btnId) {
   const btn = document.getElementById(btnId);
   btn.disabled = true;
   btn.style.opacity = '0.7';
-  
-  const batchSize = 100;
-  let queued = 0;
-  let busy = 0;
 
-  appendLog('🚀 Starting bulk stress test (' + total + ' requests)...', 'warn');
+  appendLog('🚀 Triggering massive ' + total + ' request spike...', 'warn');
+  btn.textContent = '🚀 Sending ' + total + '...';
 
-  for (let i = 0; i < total; i += batchSize) {
-    btn.textContent = '🚀 Sending ' + i + '/' + total + '...';
-    
-    const batch = [];
-    const limit = Math.min(i + batchSize, total);
-    
-    for (let j = i; j < limit; j++) {
-      const jobId = 'bulk-' + Date.now() + '-' + j;
-      const req = fetch('/job', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: jobId, payload: { source: 'bulk-ui', index: j } })
-      }).then(res => res.json()).catch(() => ({ status: 'error' }));
-      batch.push(req);
-    }
-    
-    const results = await Promise.all(batch);
-    results.forEach(r => {
-      if (r.status === 'queued') queued++;
-      else if (r.status === 'busy') busy++;
+  try {
+    const res = await fetch('/internal/bulk-job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count: total })
     });
-    
-    // Slight delay between batches (20ms) to let DOM update and prevent freezing
-    await new Promise(resolve => setTimeout(resolve, 20));
+    const data = await res.json();
+    appendLog('✅ Massive spike complete: ' + data.queued + ' queued, ' + data.busy + ' dropped.', 'info');
+  } catch (err) {
+    appendLog('❌ Failed to send bulk jobs: ' + err.message, 'error');
   }
 
   btn.textContent = '🚀 Send ' + (total === 10000 ? '10k' : total) + ' Requests';
   btn.style.opacity = '1';
   btn.disabled = false;
-  appendLog('✅ Bulk test finished: ' + queued + ' queued, ' + busy + ' busy/dropped.', 'ok');
 }
 
 async function lookupJob() {
