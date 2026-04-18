@@ -543,7 +543,17 @@ function getDashboardHTML() {
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
   :root {
-    
+    --bg:      #0d0f14;
+    --surface: #161a24;
+    --card:    #1e2333;
+    --border:  #2a2f45;
+    --accent:  #6c63ff;
+    --green:   #22c55e;
+    --yellow:  #f59e0b;
+    --red:     #ef4444;
+    --blue:    #38bdf8;
+    --text:    #e2e8f0;
+    --muted:   #64748b;
     --radius:  12px;
   }
 
